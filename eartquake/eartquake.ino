@@ -14,24 +14,30 @@ unsigned long eventStartTime = 0;
 unsigned long lastVibrationTime = 0;
 unsigned long previousCrossingTime = 0;
 unsigned long eventDuration = 0;
+unsigned long eventID = 0;
 
 const unsigned long minimumDuration = 2000; 
-const int minimumCrossings =10;
+
 const unsigned long timeout = 300;
 
 bool eventActive = false;
 bool eventConfirmed = false;
+bool earthquakeDetected =false;
 float threshold = 0.05;
 float peakVibration = 0;
+float requiredPeak = 0.15;
 float filteredMag;
 float dynamicSignal;
 float previousSignal = 0;
 int zeroCrossings = 0;
 float crossingThreshold = 0.01;
 float estimatedFrequency =0;
+float minFrequency =0.5;
+float maxFrequency = 10.0;
+const int minimumCrossings =10;
 
 int eventType=0;
-
+bool eventLogged = false;
 float base;
 float baseline(){
   int N=100;
@@ -152,18 +158,20 @@ void loop() {
     unsigned long crossingTime= currentTime;
     if (previousCrossingTime !=0){
       unsigned long halfPeriod = crossingTime - previousCrossingTime;
-      estimatedFrequency = 500.0/halfPeriod;
+      if (halfPeriod > 0){
+          estimatedFrequency = 500.0/halfPeriod;
+      }
     }
     previousCrossingTime = crossingTime;
   }
 
   }
   previousSignal= dynamicSignal;
-  if (vibration>peakVibration){
+  if (eventActive && vibration>peakVibration){
     peakVibration= vibration;
   }
   if (eventActive &&
-      currentTime - lastVibrationTime > timeout) {
+    currentTime - lastVibrationTime > timeout) {
     eventActive = false;
     if (eventDuration >= minimumDuration &&
         zeroCrossings >= minimumCrossings) {
@@ -176,6 +184,46 @@ void loop() {
         eventType = 1;   // SHORT IMPACT
 
     }
+    earthquakeDetected = false;
+    eventLogged = false;
+  }
+  if (eventActive &&
+    eventDuration >= minimumDuration &&
+    peakVibration >= requiredPeak &&
+    zeroCrossings >= minimumCrossings &&
+    estimatedFrequency >= minFrequency &&
+    estimatedFrequency <= maxFrequency) {
+
+    earthquakeDetected = true;
+
+} else {
+
+    earthquakeDetected = false;
+}
+if (earthquakeDetected && !eventLogged){
+    eventID ++;
+    eventLogged = true;
+    Serial.println("===== EARTHQUAKE EVENT =====");
+    Serial.print("Event ID: ");
+    Serial.println(eventID);
+
+    Serial.print("Peak: ");
+    Serial.println(peakVibration, 3);
+
+    Serial.print("Duration: ");
+    Serial.print(eventDuration);
+    Serial.println(" ms");
+
+    Serial.print("Frequency: ");
+    Serial.println(estimatedFrequency, 2);
+
+    Serial.print("Zero Crossings: ");
+    Serial.println(zeroCrossings);
+
+    Serial.print("Event Type: ");
+    Serial.println(eventType);
+
+    Serial.println("============================");
 
   }
   if (eventActive &&
@@ -217,10 +265,9 @@ void loop() {
   display.setCursor(70,16);
   display.print("FREQ:");
   display.println(estimatedFrequency, 2);
-  display.setCursor(0,48);
-  display.setTextSize(1);
-  display.print("TYPE:");
+  display.setCursor(0, 32);
 
+display.print("TYPE: ");
 
 if (eventType == 0) {
     display.println("NORMAL");
@@ -231,12 +278,26 @@ else if (eventType == 1) {
 else if (eventType == 2) {
     display.println("SUSTAINED");
 }
-  if (eventConfirmed) {
-    display.println("EVENT DETECTED!");
-  }
-  else if (eventActive) {
-    display.println("MONITORING...");
-  }
+
+display.setCursor(0, 44);
+
+display.print("EQ: ");
+
+if (earthquakeDetected) {
+    display.println("DETECTED");
+}
+else {
+    display.println("NO");
+}
+
+display.setCursor(0, 56);
+
+// if (eventConfirmed) {
+//     display.println("EVENT DETECTED!");
+// }
+// else if (eventActive) {
+//     display.println("MONITORING...");
+// }
   display.display();
 
   delay(10);
