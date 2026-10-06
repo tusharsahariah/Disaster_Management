@@ -7,43 +7,55 @@
 #include <Firebase_ESP_Client.h>
 #include "secret.h"
 
+//Oled
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+//MPU
+MPU6050 mpu;
+
+//Firebase
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
-MPU6050 mpu;
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 unsigned long eventStartTime = 0;
 unsigned long lastVibrationTime = 0;
 unsigned long previousCrossingTime = 0;
 unsigned long eventDuration = 0;
+unsigned long impactStartTime=0;
+const unsigned long impactDuration=1000;
 
 const unsigned long minimumDuration = 2000; 
 const int minimumCrossings =10;
 const unsigned long timeout = 300;
+unsigned long earthquakeDisplayStartTime = 0;
+const unsigned long earthquakeDisplayDuration = 3000;
+
+bool earthquakeDisplayActive = false;
 
 bool eventActive = false;
 bool eventConfirmed = false;
-float threshold = 0.05;
+bool impactTriggered = false;
+
 float peakVibration = 0;
 float filteredMag;
 float dynamicSignal;
 float previousSignal = 0;
 int zeroCrossings = 0;
-float crossingThreshold = 0.01;
 float estimatedFrequency =0;
 bool earthquakeDetected = false;
 bool eventLogged = false;
 
 unsigned long eventID = 0;
 
+float threshold = 0.05;
 float requiredPeak = 0.15;
 float minFrequency = 0.5;
 float maxFrequency = 10.0;
+float crossingThreshold = 0.01;
 
 int eventType=0;
 
@@ -75,25 +87,23 @@ void setup() {
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     while (1);
   }
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,0);
-  display.println("SCANNING.....");
-  display.display();
 
-  display.println("OLED OK!");
   while (WiFi.status()!= WL_CONNECTED){
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0,0);
+    display.println("SCANNIGN WIFI....");
+    display.display();
     delay(300);
   }
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0,0);
 
+  display.clearDisplay();
+  display.setCursor(0,0);
   display.println("WIFI CONNECTED");
   display.println(WiFi.localIP());
   display.display();
+  delay(1000);
 
   //FIREBASE
   config.api_key = FIREBASE_API_KEY;
@@ -113,35 +123,30 @@ void setup() {
   display.setCursor(0, 0);
   display.println("FIREBASE READY");
   display.display();
+  delay(1000);
 
-
+  //mpu
   mpu.initialize();
   if (!mpu.testConnection()) {
-
     display.clearDisplay();
     display.setCursor(0, 0);
-
     display.println("MPU6050");
     display.println("NOT FOUND!");
-
     display.display();
-
     while (1);
   }
 
 
   display.clearDisplay();
   display.setCursor(0, 0);
-
   display.println("EARTHQUAKE DETECTOR");
   display.println("VERSION 1.0");
-
   display.display();
+  delay(2000);
 
-  delay(1000);
+
   display.clearDisplay();
   display.setCursor(0, 0);
-
   display.println("CALIBRATING...");
   delay(1000);
   base = baseline();
@@ -151,14 +156,10 @@ void setup() {
   // Display baseline
   display.clearDisplay();
   display.setCursor(0, 0);
-
   display.println("BASELINE:");
-
   display.print(base, 4);
   display.println(" g");
-
   display.display();
-
   delay(2000);
 
 }
@@ -214,23 +215,23 @@ void loop() {
   if (vibration>peakVibration){
     peakVibration= vibration;
   }
+  if (vibration >=requiredPeak && !impactTriggered){
+    eventType=1;
+    impactStartTime=currentTime;
+    impactTriggered = true;
+  }
+  if (eventType == 1 &&
+    currentTime - impactStartTime >= impactDuration ) {
+    eventType = 0;             
+  } 
+  if (vibration < threshold) {
+    impactTriggered = false;
+  }
   if (eventActive &&
       currentTime - lastVibrationTime > timeout) {
-    eventActive = false;
-    if (eventDuration >= minimumDuration &&
-        zeroCrossings >= minimumCrossings) {
-
-        eventType = 2;   // SUSTAINED VIBRATION
-
-    }
-    else {
-
-        eventType = 1;
-      
-
-    }
-    earthquakeDetected = false;
-    eventLogged = false;
+      eventActive = false;
+      earthquakeDetected = false;
+      eventLogged = false;
 
   }
   if (eventActive &&
@@ -241,32 +242,36 @@ void loop() {
     estimatedFrequency <= maxFrequency) {
 
     earthquakeDetected = true;
-}
-else {
-    earthquakeDetected = false;
-}
-if (earthquakeDetected && !eventLogged){
-  eventID++;
-  eventLogged =true;
-  String eventPath = "/events/event_" + String(eventID);
-  FirebaseJson eventData;
-  eventData.set("peak", peakVibration);
-  eventData.set("duration", eventDuration);
-  eventData.set("frequency", estimatedFrequency);
-  eventData.set("crossings", zeroCrossings);
-  eventData.set("type", "SUSTAINED");
-  eventData.set("detected", true);
-  if (Firebase.RTDB.setJSON(&fbdo, eventPath.c_str(), &eventData)) {
-
-        Serial.println("Earthquake event uploaded successfully");
-
+    if (!earthquakeDisplayActive) {
+        earthquakeDisplayActive = true;
+        earthquakeDisplayStartTime = currentTime;
+    }
     }
     else {
-
-        Serial.print("Event upload failed: ");
-        Serial.println(fbdo.errorReason());
-
+        earthquakeDetected = false;
+        earthquakeDisplayActive = false;
     }
+  if (earthquakeDetected && !eventLogged){
+    eventID++;
+    eventLogged =true;
+    String eventPath = "/events/event_" + String(eventID);
+    FirebaseJson eventData;
+    eventData.set("peak", peakVibration);
+    eventData.set("duration", eventDuration);
+    eventData.set("frequency", estimatedFrequency);
+    eventData.set("crossings", zeroCrossings);
+    eventData.set("detected", true);
+    if (Firebase.RTDB.setJSON(&fbdo, eventPath.c_str(), &eventData)) {
+
+          Serial.println("Earthquake event uploaded successfully");
+
+      }
+      else {
+
+          Serial.print("Event upload failed: ");
+          Serial.println(fbdo.errorReason());
+
+      }
     FirebaseJson currentData;
 
     currentData.set("detected", true);
@@ -289,13 +294,13 @@ if (earthquakeDetected && !eventLogged){
     }
 
 }
-  if (eventActive &&
-      eventDuration >=  minimumDuration) {
-    eventConfirmed = true;
-  }
-  else {
-    eventConfirmed=false;
-  }
+  // if (eventActive &&
+  //     eventDuration >=  minimumDuration) {
+  //   eventConfirmed = true;
+  // }
+  // else {
+  //   eventConfirmed=false;
+  // }
 
   
   display.clearDisplay();
@@ -316,9 +321,9 @@ if (earthquakeDetected && !eventLogged){
   display.print("Mag:");
   display.println(mag, 3);
 
-  display.setCursor(64, 0);
-  display.print("BASE:");
-  display.println(base, 3);
+  // display.setCursor(64, 0);
+  // display.print("BASE:");
+  // display.println(base, 3);
   display.setCursor(0, 10);
   display.print("VIB:");
   display.println(vibration, 3);
@@ -338,28 +343,19 @@ if (earthquakeDetected && !eventLogged){
   if (eventType == 0) {
     display.print("NORMAL");
     }
-    else if (eventType == 1) {
-      display.print("IMPACT");
-    }
-    else if (eventType == 2) {
-      display.print("SUSTAINED");
-    }
+  else if(eventType==1){
+    display.print("IMPACT");
+  }
   display.setCursor(0, 44);
   display.print("EQ:");
-  if (earthquakeDetected) {
+  if (earthquakeDisplayActive &&
+    currentTime - earthquakeDisplayStartTime < earthquakeDisplayDuration) {
       display.println("DETECTED");
-      delay(3000);
+      display.display()
   }
   else {
-      display.println("NO");
+      display.println("MONITORING.....");
   }
-
-  if (eventActive) {
-      display.print("MONITORING...");
-    }
-    else {
-      display.print("STANDBY");
-    }
   display.display();
 
   delay(10);
