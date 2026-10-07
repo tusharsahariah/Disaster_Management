@@ -7,10 +7,23 @@
 #define TRIG_PIN 9
 #define ECHO_PIN 10
 
-const float SAFE_POINT = 8.5;
+// const unsigned long interval=500;
+// unsigned long previousMillis=0;
+
+const float EMPTY_DISTANCE = 15.0;
+const float FULL_DISTANCE = 3.0;
+float distance;
+
+
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+
+float waterLevelPercent(){
+  float levelPercent = ((EMPTY_DISTANCE-distance)/(EMPTY_DISTANCE-FULL_DISTANCE))*100.0;
+  levelPercent = constrain(levelPercent, 0, 100);
+  return levelPercent;
+}
 
 float getDistance(){
   digitalWrite(TRIG_PIN, LOW);
@@ -53,20 +66,43 @@ void setup() {
 }
 
 void loop() {
-  float distance = getAverage();
+  // unsigned long currentMillis =millis();
+  // if(currentMillis-previousMillis>=interval){
+  //   previousMillis=currentMillis;
+  // }
+  distance = getAverage();
+  float levelPercent = waterLevelPercent();
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println("DISTANCE:");
   display.print(distance);
   display.print(" cm");
+  display.setCursor(0, 30);
+  display.print("STATUS:");
 
-  if(distance<= SAFE_POINT){
+  if(levelPercent < 20.0){
     display.println();
-    display.println("ALERT ALERT");
+    display.println("EMPTY");
+  }
+  else if(levelPercent <50.0){
+    display.println();
+    display.println("LOW");
+  }
+  else if(levelPercent < 75.0){
+    display.println();
+    display.println("MEDIUM");
+  }
+  else if(levelPercent <90.0){
+    display.println();
+    display.println("HIGH");
+  }
+  else if(levelPercent <95.0){
+    display.println();
+    display.println("HIGH WATER LEVEL");
   }
   else{
     display.println();
-    display.println("NORMAL");
+    display.println("OVERFLOW RISK");
   }
   display.display();
 
